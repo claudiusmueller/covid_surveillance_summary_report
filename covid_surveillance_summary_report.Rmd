@@ -75,7 +75,7 @@ results <- left_join(results, runs, by = "run_id")
 
 ```{r}
 # add old subject info prior to new-style database
-oldschedulesdir <- "old_ICA_schedules/"
+oldschedulesdir <- "/data/work/Projects - Active/CAP/Covid/GMU_Virus/summary_report/old_ICA_schedules/"
 filenames <- dir(path = oldschedulesdir, pattern = "*.xlsm")
 old_schedules <- list()
 
