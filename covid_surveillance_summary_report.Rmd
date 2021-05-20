@@ -1,0 +1,285 @@
+---
+title: "Covid Surveillance Summary Report (LDT Lab)"
+author: "Claudius Mueller"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: pdf_document
+header-includes:
+  - \usepackage{xcolor}
+  - \usepackage{booktabs}
+  - \usepackage{longtable}
+  - \usepackage{array}
+  - \usepackage{multirow}
+  - \usepackage{wrapfig}
+  - \usepackage{float}
+  - \usepackage{colortbl}
+  - \usepackage{pdflscape}
+  - \usepackage{tabu}
+  - \usepackage{threeparttable}
+  - \usepackage[normalem]{ulem}
+---
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE, eval=TRUE}
+library(knitr)
+opts_chunk$set(echo = FALSE)
+opts_chunk$set(warning = FALSE)
+opts_chunk$set(message = FALSE)
+opts_chunk$set(comment = "")
+opts_chunk$set(results = "asis")
+# knitr::opts_chunk$set(fig.path = "figure/", dev='tif')
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(janitor)
+library(kableExtra)
+library(tidyquant)
+library(ggtext)
+
+# cutpoints
+cutpoint_rnasep   <<- 30
+cutpoint_n1gene   <<- 36
+
+# strings for output categories
+positive_str      <<- "detected"     # N1 = Amp; P = Amp
+negative_str      <<- "not detected" # N1 = no Amp; P = Amp
+indeterminate_str <<- "indeterminate, pending repeat analysis" # P = no Amp
+bad_str           <<- "specimen inadequate"
+pending_str       <<- "pending"
+not_received_str  <<- "sample not received"
+
+# strings for status
+final_str         <<- "final"
+preliminary_str   <<- "preliminary"
+scheduled_str     <<- "scheduled"
+```
+
+```{r}
+# load covid database
+filename <- "/data/work/Projects - Active/CAP/Covid/GMU_Virus/summary_report/Covid_DB_up_to_run_465_051021_215639.xlsx"
+results <- read_excel(filename, sheet = "results")
+runs <- read_excel(filename, sheet = "runs")
+subject_info <- read_excel(filename, sheet = "subject_info")
+```
+
+```{r}
+# add missing date to run 3
+runs[runs$run_id == 3, "test_date"] <- as_datetime("2020/12/01 17:10:03")
+```
+
+```{r}
+# add test_date to results data
+results <- left_join(results, runs, by = "run_id")
+```
+
+```{r}
+# add old subject info prior to new-style database
+oldschedulesdir <- "/data/work/Projects - Active/CAP/Covid/GMU_Virus/summary_report/old_ICA_schedules/"
+filenames <- dir(path = oldschedulesdir, pattern = "*.xlsm")
+old_schedules <- list()
+
+for (i in 1:length(filenames)){
+  old_schedule <- read_excel(paste0(oldschedulesdir, filenames[i])) %>%
+    clean_names() %>%
+    rename(collection_date = date,
+           netid = net_id) %>%
+    mutate(collection_date = ymd(collection_date),
+           dob = as_date(dob),
+           barcode = as.character(barcode)) %>%
+    select(barcode, g_number, netid, first_name, last_name, dob, 
+           collection_date)
+  old_schedules[[i]] <- old_schedule
+}
+old_schedules <- old_schedules %>%
+  reduce(bind_rows)
+
+subject_info_complete <- subject_info %>%
+      bind_rows(old_schedules) %>%
+      distinct(barcode, netid, g_number, .keep_all = TRUE)
+```
+
+```{r}
+# samples with/without subject info
+no_info <- results %>%
+  filter(!(barcode %in% subject_info_complete$barcode)) %>%
+  arrange(run_id)
+no_info <- unique(no_info$barcode)
+num_no_info <- length(no_info)
+
+with_info <- results$barcode[results$barcode %in% subject_info_complete$barcode]
+num_with_info <- length(with_info)
+
+sample_results <- results %>%
+  filter(barcode %in% with_info)
+```
+
+```{r}
+matched_results <- sample_results %>%
+    group_by(barcode) %>%
+    mutate(occurance = 1:n()) %>%
+    pivot_wider(names_from = occurance,
+                values_from = c(result, run_id, test_date, rnasep, n1gene)) %>%
+    mutate(result_2 = ifelse("result_2" %in% names(.), result_2, NA),
+           run_id_2 = ifelse("run_id_2" %in% names(.), run_id_2, NA),
+           test_date_2 = ifelse("test_date_2" %in% names(.), test_date_2, NA),
+           test_date_2 = as_datetime(test_date_2),
+           rnasep_2 = ifelse("rnasep_2" %in% names(.), rnasep_2, NA),
+           n1gene_2 = ifelse("n1gene_2" %in% names(.), n1gene_2, NA),
+           result_3 = ifelse("result_3" %in% names(.), result_3, NA),
+           run_id_3 = ifelse("run_id_3" %in% names(.), run_id_3, NA),
+           test_date_3 = ifelse("test_date_3" %in% names(.), test_date_3, NA),
+           test_date_3 = as_datetime(test_date_3),
+           rnasep_3 = ifelse("rnasep_3" %in% names(.), rnasep_3, NA),
+           n1gene_3 = ifelse("n1gene_3" %in% names(.), n1gene_3, NA))
+
+matched_results <- matched_results %>%
+  mutate(result_final = 
+           case_when(result_1 == negative_str ~ negative_str,
+                     result_1 == bad_str ~ bad_str,
+                     (result_1 == positive_str & 
+                        result_2 == positive_str) ~ positive_str,
+                     (result_1 == positive_str &
+                        result_2 == bad_str) ~ bad_str,
+                     (result_1 == positive_str & 
+                        result_2 == negative_str &
+                        result_3 == negative_str) ~ negative_str,
+                     (result_1 == positive_str &
+                        result_2 == negative_str &
+                        result_3 == positive_str) ~ positive_str,
+                     (result_1 == positive_str &
+                        result_2 == negative_str &
+                        result_3 == indeterminate_str) ~ bad_str,
+                     (result_1 == positive_str &
+                        result_2 == negative_str &
+                        result_3 == bad_str) ~ bad_str,
+                     (result_1 == positive_str &
+                        result_2 == indeterminate_str & 
+                        result_3 == negative_str) ~ bad_str,
+                     (result_1 == positive_str &
+                        result_2 == indeterminate_str & 
+                        result_3 == positive_str) ~ positive_str,
+                     (result_1 == positive_str &
+                        result_2 == indeterminate_str & 
+                        result_3 == bad_str) ~ bad_str,
+                     (result_1 == indeterminate_str & 
+                        result_2 == positive_str & 
+                        result_3 == negative_str) ~ bad_str,
+                     (result_1 == indeterminate_str &
+                        result_2 == positive_str &
+                        result_3 == positive_str) ~ positive_str,
+                     (result_1 == indeterminate_str &
+                        result_2 == negative_str) ~ negative_str,
+                     (result_1 == indeterminate_str &
+                        result_2 == indeterminate_str) ~ bad_str,
+                     (result_1 == indeterminate_str &
+                        result_2 == bad_str) ~ bad_str,
+                     TRUE ~ pending_str),
+         test_status = ifelse(result_final == pending_str, preliminary_str,
+                              final_str))
+```
+
+# Covid Surveillance Summary
+
+_**Data Summary up to**_
+  
+  * **Date:** `r format(Sys.time(), '%B %d, %Y')`
+  
+  * **LDT Lab Test Run:** `r max(runs$run_id)`
+  
+  * **Total number of tests performed (including controls and repeats):** `r nrow(results)`
+
+
+```{r}
+matched_results <- matched_results %>%
+  mutate(result_date = case_when((is.na(test_date_3) & is.na(test_date_2)) ~ test_date_1,
+                                 is.na(test_date_3) ~ test_date_2,
+                                 TRUE ~ test_date_3),
+         result_date = ifelse(is.na(result_date), 
+                              VLOOKUP(barcode, subject_info_complete, 
+                                      barcode, collection_date),
+                              result_date),
+         result_date = as_datetime(result_date),
+         result_week = week(result_date),
+         result_year = year(result_date),
+         result_date_str = paste0(result_year, ", ", "Week", result_week))
+
+n_summary <- matched_results %>%
+  ungroup() %>%
+  count(result_date_str, result_final) %>%
+  pivot_wider(names_from = result_final, values_from = n, values_fill = 0) %>%
+  mutate(year = as.integer(str_extract(result_date_str, "^\\d{4}")),
+         week = as.integer(str_extract(result_date_str, "(?<=Week)\\d{1,2}"))) %>% 
+  arrange(year, week) %>% 
+  select(-pending, -year, -week) %>%
+  mutate(perc_pos = detected / (detected + `not detected` + 
+                                  `specimen inadequate`))
+
+n_total <- n_summary %>%
+  summarize(across(-result_date_str, sum)) %>%
+  mutate(result_date_str = "Total",
+         perc_pos = detected / (detected + `not detected` + 
+                                  `specimen inadequate`))
+
+n_summary_out <- n_summary %>%
+  bind_rows(n_total) %>%
+  mutate(perc_pos = paste(round(perc_pos * 100, 2), "%")) %>%
+  rename(`Testing Week` = result_date_str,
+         `% Detected` = perc_pos)
+n_summary_out %>%
+  kable(caption = "Number of Subjects per Category per Week", "latex", 
+        booktabs = TRUE, linesep = "") %>%
+  kable_styling(latex_options=c('striped', 'hold_position')) %>%
+  row_spec(which(n_summary_out["Testing Week"] == "Total"), bold = TRUE, 
+           color = "white", background = "darkgray")
+```
+
+
+
+```{r}
+n_summary_plot <- matched_results %>%
+  ungroup() %>%
+  count(result_date, result_final) %>%
+  pivot_wider(names_from = result_final, values_from = n, values_fill = 0) %>%
+  select(-pending) %>% 
+  mutate(total = detected + `not detected` + `specimen inadequate`)
+
+n_summary_plot_indiv <- n_summary_plot %>%
+  pivot_longer(-result_date, names_to = "result", values_to = "subjects") %>%
+  mutate(result_date = as_date(result_date))
+
+n_summary_plot_perc <- n_summary_plot %>%
+  mutate(perc_pos = detected / (detected + `not detected` + 
+                                  `specimen inadequate`) * 100,
+         result_date = as_date(result_date)) %>%
+  select(result_date, perc_pos)
+
+p <- n_summary_plot_indiv %>%
+  group_by(result) %>%
+  ggplot(aes(x = result_date, y = subjects, fill = result)) +
+  geom_col(show.legend = FALSE) +
+  theme_classic() +
+  theme(strip.background = element_blank(),
+        strip.text = element_textbox(
+          size = 12,
+          color = "white", fill = "#5D729D", box.color = "#4A618C",
+          halign = 0.5, linetype = 1, r = unit(5, "pt"), width = unit(1, "npc"),
+          padding = margin(2, 0, 1, 0), margin = margin(3, 3, 3, 3))) +
+  labs(x = element_blank(), y = "Number of Subjects") +
+  facet_wrap(~result, nrow = 3, scale = "free", )
+p
+```
+
+\vspace{10mm}
+
+```{r, fig.height=3}
+p2 <- n_summary %>%
+  mutate(perc_pos = perc_pos * 100) %>% 
+  ggplot(aes(x = result_date_str, y = perc_pos)) +
+  geom_col(fill = "orange") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust=1, vjust = 0.5)) +
+  labs(title = "% Subjects 'detected'",
+       x = element_blank(), y = "% 'detected' of total")
+p2
+```
