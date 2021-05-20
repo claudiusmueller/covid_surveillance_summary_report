@@ -16,10 +16,12 @@ This R-markdown script summarizes the COVID-19 testing data as performed at the 
 
 1. Clone github project.
 
-2. Open the script file in RStudio (or other editor).
+2. Add a copy of old ICA schedules (date prior to database setup) into an "old_ICA_schedules" subdirectory. This data cannot be shared via github due to HIPAA regulations.
 
-3. Update the following lines of code:
-  * line 3: set the author of the report
-  * line 60: set the path/filename to the most up-to-date Covid Database
+3. Open the script file in RStudio (or other editor).
 
-4. Knit the markdown file to create a pdf report (click "knit" in RStudio).
+4. Update the following lines of code:
+   * line 3: set the author of the report
+   * line 60: set the path/filename to the most up-to-date Covid Database (make sure to use "\\" for any "\" when on a Windows operating system)
+
+5. Knit the markdown file to create a pdf report (click "knit" in RStudio).
